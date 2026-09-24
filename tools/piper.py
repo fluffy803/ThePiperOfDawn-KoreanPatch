@@ -131,6 +131,116 @@ class Game:
         return env, tables, crc
 
 
+# ---------------------------------------------------------------- UI prefab (하드코딩 텍스트)
+# 일부 UI(낚시 보물상자 팝업 등)는 프리팹의 UGUI Text.m_Text 에 중국어가 박혀 있어 언어 설정과 무관.
+# 번역: translations/ui_prefab.ko.json = {"<번들명>": {"<path_id>[|<필드경로>]": "한국어"}}
+# 프리팹 번들엔 CRC 위조용 빈 공간이 없으므로 매니페스트의 ContentCRC 를 새 값으로 바꾸고
+# .hash(= 매니페스트 MD5)를 다시 쓴다. 따라서 이 패치가 들어간 zip 은 게임 버전이 정확히 맞아야 한다.
+UI_FILE = "ui_prefab"
+
+
+def _field_get(tree, path):
+    cur = tree
+    for part in path.split("."):
+        m = re.match(r"(\w+)(?:\[(\d+)\])?$", part)
+        cur = cur[m.group(1)]
+        if m.group(2) is not None:
+            cur = cur[int(m.group(2))]
+    return cur
+
+
+def _field_set(tree, path, value):
+    parts = path.split(".")
+    cur = tree
+    for part in parts[:-1]:
+        m = re.match(r"(\w+)(?:\[(\d+)\])?$", part)
+        cur = cur[m.group(1)]
+        if m.group(2) is not None:
+            cur = cur[int(m.group(2))]
+    m = re.match(r"(\w+)(?:\[(\d+)\])?$", parts[-1])
+    if m.group(2) is None:
+        cur[m.group(1)] = value
+    else:
+        cur[m.group(1)][int(m.group(2))] = value
+
+
+def _split_key(key):
+    pid, _, field = key.partition("|")
+    return int(pid), (field or "m_Text")
+
+
+def content_crc(env):
+    """Unity ContentCRC = 번들 내 모든 파일(CAB, .resS …)의 압축해제 바이트를 순서대로 이은 CRC32."""
+    c = 0
+    for fo in env.file.files.values():
+        raw = fo.reader.bytes if hasattr(fo, "reader") else fo.bytes
+        c = zlib.crc32(raw, c)
+    return c & 0xFFFFFFFF
+
+
+def _manifest_paths(g):
+    return (os.path.join(g.main, f"PackageManifest_Main_{g.version}.bytes"),
+            os.path.join(g.main, f"PackageManifest_Main_{g.version}.hash"))
+
+
+def _crc_offset(man, name, bundle_hash):
+    """매니페스트에서 <번들명> 바로 뒤 uint32 LE = ContentCRC (그 뒤 len16 + 파일해시)."""
+    nb = name.encode()
+    i = man.find(nb)
+    while i >= 0:
+        j = i + len(nb)
+        if man[j + 4:j + 6] == b"\x20\x00" and man[j + 6:j + 38] == bundle_hash.encode():
+            return j
+        i = man.find(nb, i + 1)
+    sys.exit(f"매니페스트에서 {name} 의 CRC 위치를 찾지 못함")
+
+
+def pristine_manifest(g):
+    """원본 매니페스트 bytes. 처음 보는 버전이면 백업하되, 테이블 번들 항목 CRC가 원본과 맞는지로 원본 여부 확인."""
+    bpath, _ = _manifest_paths(g)
+    backup = os.path.join(WORK_DIR, "backup", os.path.basename(bpath))
+    if os.path.exists(backup):
+        return open(backup, "rb").read()
+    man = open(bpath, "rb").read()
+    env = UnityPy.load(bc.crypt(g.pristine_bundle(), TABLE_BUNDLE))
+    off = _crc_offset(man, TABLE_BUNDLE, g.bundle_hash)
+    if int.from_bytes(man[off:off + 4], "little") != content_crc(env):
+        sys.exit("설치된 매니페스트가 원본이 아님(백업 없음) -> Steam 무결성 검사 후 다시 실행")
+    os.makedirs(os.path.dirname(backup), exist_ok=True)
+    with open(backup, "wb") as f:
+        f.write(man)
+    return man
+
+
+def pristine_named_bundle(g, name, bundle_hash):
+    path = os.path.join(g.main, bundle_hash + ".bundle")
+    backup = os.path.join(WORK_DIR, "backup", bundle_hash + ".bundle")
+    data = open(path, "rb").read()
+    if hashlib.md5(data).hexdigest() == bundle_hash:
+        if not os.path.exists(backup):
+            os.makedirs(os.path.dirname(backup), exist_ok=True)
+            shutil.copyfile(path, backup)
+        return data
+    if os.path.exists(backup):
+        return open(backup, "rb").read()
+    sys.exit(f"{name} 번들이 원본이 아니고 백업도 없음 -> Steam 무결성 검사 후 다시 실행")
+
+
+def ui_src_hash(text):
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
+
+
+def ui_bundles(g):
+    """{번들명: (hash, env)} for bundles referenced by ui_prefab.ko.json (원본 기준)."""
+    tr = jload(os.path.join(TR_DIR, f"{UI_FILE}.ko.json"))
+    man = pristine_manifest(g) if tr else b""
+    out = {}
+    for name in tr:
+        h = Game._find_hash(man, name)
+        out[name] = (h, UnityPy.load(bc.crypt(pristine_named_bundle(g, name, h), name)))
+    return tr, man, out
+
+
 # ---------------------------------------------------------------- check
 def cmd_check(a):
     g = Game(a.game)
@@ -159,16 +269,66 @@ def cmd_check(a):
         report["tables"][name] = dict(rows=len(rows), new=n_new, changed=n_changed, removed=len(removed))
         print(f"[{name}] 행 {len(rows)} | 신규 {n_new} | 원문변경 {n_changed} | 게임에서 삭제 {len(removed)}"
               f"  -> work/todo_{name}.json")
+    # UI 프리팹: 번역한 위치가 사라졌거나 원문이 바뀐 것
+    tr, _, bundles = ui_bundles(g)
+    hs = jload(os.path.join(META_DIR, f"{UI_FILE}.srchash.json"))
+    todo = []
+    for bname, items in tr.items():
+        _, env = bundles[bname]
+        objs = {o.path_id: o for o in env.objects}
+        for key, ko in items.items():
+            pid, field = _split_key(key)
+            o = objs.get(pid)
+            if o is None:
+                todo.append({"bundle": bname, "key": key, "status": "missing", "prev_ko": ko}); continue
+            cn = _field_get(o.read_typetree(), field)
+            if hs.get(bname, {}).get(key) != ui_src_hash(cn):
+                todo.append({"bundle": bname, "key": key, "status": "changed", "cn": cn, "prev_ko": ko})
+    if tr:
+        jsave(os.path.join(WORK_DIR, f"todo_{UI_FILE}.json"), todo)
+        n = sum(len(v) for v in tr.values())
+        report["tables"][UI_FILE] = dict(entries=n, changed_or_missing=len(todo))
+        print(f"[UI 프리팹] 번역 {n}곳 | 원문변경·위치소실 {len(todo)}  -> work/todo_{UI_FILE}.json")
     jsave(os.path.join(WORK_DIR, "check_report.json"), report)
 
 
 # ---------------------------------------------------------------- merge
+def merge_ui(g, path):
+    new = jload(path)
+    tr = jload(os.path.join(TR_DIR, f"{UI_FILE}.ko.json"))
+    hs = jload(os.path.join(META_DIR, f"{UI_FILE}.srchash.json"))
+    man = pristine_manifest(g)
+    for bname, items in new.items():
+        h = Game._find_hash(man, bname)
+        env = UnityPy.load(bc.crypt(pristine_named_bundle(g, bname, h), bname))
+        objs = {o.path_id: o for o in env.objects}
+        n = skipped = 0
+        for key, ko in items.items():
+            pid, field = _split_key(key)
+            o = objs.get(pid)
+            if o is None or not isinstance(ko, str) or not ko.strip():
+                skipped += 1
+                continue
+            cn = _field_get(o.read_typetree(), field)
+            if cn.count("\n") != ko.count("\n"):
+                sys.exit(f"[UI] {bname} {key}: 줄바꿈 개수 불일치")
+            tr.setdefault(bname, {})[key] = ko
+            hs.setdefault(bname, {})[key] = ui_src_hash(cn)
+            n += 1
+        print(f"[UI 프리팹] {bname}: {n}곳 반영, {skipped}곳 건너뜀(번들에 없는 위치/빈값)")
+    jsave(os.path.join(TR_DIR, f"{UI_FILE}.ko.json"), tr)
+    jsave(os.path.join(META_DIR, f"{UI_FILE}.srchash.json"), hs)
+
+
 def cmd_merge(a):
     g = Game(a.game)
     _, tables, _ = g.load()
     rowmap = {name: {str(r[1]): r for r in t[3]} for name, t in tables.items()}
     for path in a.files:
         base = os.path.basename(path)
+        if UI_FILE in base:
+            merge_ui(g, path)
+            continue
         name = next((n for n in sorted(FIELDMAP, key=len, reverse=True) if n in base), None)
         if not name:
             sys.exit(f"파일명에 테이블명(Language/LanguageTalk)이 없음: {path}")
@@ -284,14 +444,60 @@ def cmd_build(a):
                 raw = raw if isinstance(raw, (bytes, bytearray)) else raw.encode("utf-8", "surrogateescape")
                 tp.parse_table(tc.decrypt(bytes(raw)))
 
+    # 결과물: {게임폴더 기준 상대경로: bytes}
+    files = {os.path.join(MAIN_REL, g.bundle_hash + ".bundle"): out_bundle}
+
+    # UI 프리팹 하드코딩 텍스트
+    tr, man, bundles = ui_bundles(g)
+    if tr:
+        hs = jload(os.path.join(META_DIR, f"{UI_FILE}.srchash.json"))
+        man = bytearray(man)
+        ui_stats = dict(applied=0, stale_skipped=0, missing=0)
+        for bname, items in tr.items():
+            h, uenv = bundles[bname]
+            objs = {o.path_id: o for o in uenv.objects}
+            trees = {}
+            for key, ko in items.items():
+                pid, field = _split_key(key)
+                o = objs.get(pid)
+                if o is None:
+                    ui_stats["missing"] += 1; continue
+                tree = trees.get(pid) or o.read_typetree()
+                cn = _field_get(tree, field)
+                if not a.allow_stale and hs.get(bname, {}).get(key) != ui_src_hash(cn):
+                    ui_stats["stale_skipped"] += 1; continue
+                _field_set(tree, field, ko)
+                trees[pid] = tree
+                ui_stats["applied"] += 1
+            for pid, tree in trees.items():
+                objs[pid].save_typetree(tree)
+            plain = uenv.file.save(packer="lz4")
+            chk = UnityPy.load(plain)
+            new_crc = content_crc(chk)
+            cobjs = {o.path_id: o for o in chk.objects}
+            for key, ko in items.items():   # 검증: 저장본에 실제로 들어갔는지
+                pid, field = _split_key(key)
+                if pid in trees:
+                    assert _field_get(cobjs[pid].read_typetree(), field) == ko, f"UI 반영 실패 {key}"
+            off = _crc_offset(man, bname, h)
+            man[off:off + 4] = new_crc.to_bytes(4, "little")
+            files[os.path.join(MAIN_REL, h + ".bundle")] = bc.crypt(plain, bname)
+        man = bytes(man)
+        bpath, hpath = _manifest_paths(g)
+        files[os.path.join(MAIN_REL, os.path.basename(bpath))] = man
+        files[os.path.join(MAIN_REL, os.path.basename(hpath))] = hashlib.md5(man).hexdigest().encode()
+        stats[UI_FILE] = ui_stats
+        print(f"[UI 프리팹] 적용 {ui_stats['applied']} | 원문변경으로 제외 {ui_stats['stale_skipped']}"
+              f" | 위치소실 {ui_stats['missing']}  (매니페스트 CRC·.hash 갱신)")
+
     ver = jload(os.path.join(ROOT, "VERSION.json"), {})
     patch_ver = ver.get("patch_version", "0.0.0")
     zip_name = f"ThePiperOfDawn_KoreanPatch_v{patch_ver}.zip"
     os.makedirs(DIST_DIR, exist_ok=True)
     zpath = os.path.join(DIST_DIR, zip_name)
-    arc = "/".join(["ThePiper_Data", "StreamingAssets", "yoo", "Main", g.bundle_hash + ".bundle"])
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_STORED) as z:  # 암호화 데이터라 압축 무의미
-        z.writestr(arc, out_bundle)
+        for rel, data in files.items():
+            z.writestr(rel.replace(os.sep, "/"), data)
     ver.update({
         "game_manifest_version": g.version,
         "table_bundle": g.bundle_hash,
@@ -300,11 +506,12 @@ def cmd_build(a):
         "stats": stats,
     })
     jsave(os.path.join(ROOT, "VERSION.json"), ver)
-    print(f"배포 zip: {zpath}")
+    print(f"배포 zip: {zpath}  ({len(files)}개 파일)")
     if a.install:
-        with open(g.bundle_path, "wb") as f:
-            f.write(out_bundle)
-        print(f"게임에 설치함: {g.bundle_path}  (원본 백업: work/backup/)")
+        for rel, data in files.items():
+            with open(os.path.join(g.dir, rel), "wb") as f:
+                f.write(data)
+        print(f"게임에 설치함: {len(files)}개 파일  (원본 백업: work/backup/)")
 
 
 def main():

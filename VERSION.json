@@ -12,6 +12,11 @@
    "applied": 41130,
    "stale_skipped": 0,
    "untranslated": 0
+  },
+  "ui_prefab": {
+   "applied": 104,
+   "missing": 0,
+   "stale_skipped": 0
   }
  },
  "table_bundle": "8f59f03804174050336ff0ce81c7dad3",
