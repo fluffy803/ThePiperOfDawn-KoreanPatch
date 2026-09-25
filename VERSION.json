@@ -1,7 +1,7 @@
 {
  "built": "2026-09-25",
- "game_manifest_version": "2026-09-24-1355",
- "patch_version": "1.0.5",
+ "game_manifest_version": "2026-09-25-1016",
+ "patch_version": "1.0.6",
  "stats": {
   "Language": {
    "applied": 6453,
@@ -19,6 +19,6 @@
    "stale_skipped": 0
   }
  },
- "table_bundle": "8276cc8abb783c6a09ca51235ea0af1c",
- "table_content_crc": "57dc17b6"
+ "table_bundle": "c9c85bb2d9cbae829d7118a9c414bae6",
+ "table_content_crc": "45a262ee"
 }
