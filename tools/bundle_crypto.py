@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""YooAsset bundle encryption used by The Piper Of Dawn (Steam release).
+"""YooAsset bundle encryption used by The Piper of Dawn (Steam release).
 
 master = SHA256( concat_i( A[p[i]] XOR B[p[i]] ) )   (8-byte constant pairs, p = [2,0,3,1])
 key    = HMAC-SHA256(master, UTF8("bundle-key|" + bundleName.strip().lower()))   -> AES-256

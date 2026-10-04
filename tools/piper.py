@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""The Piper Of Dawn 한국어 패치 관리 도구.
+"""The Piper of Dawn 한국어 패치 관리 도구.
 
   python tools/piper.py check  [--game DIR]          게임과 번역 비교 -> work/todo_*.json
   python tools/piper.py merge  FILE [FILE ...]        번역 결과({id: 한국어}) 반영 + 원문해시 기록

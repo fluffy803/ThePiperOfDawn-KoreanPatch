@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""The Piper Of Dawn - GameRes/Table decrypt & encrypt.
+"""The Piper of Dawn - GameRes/Table decrypt & encrypt.
 Scheme (from Assembly-CSharp bz.ekp + BouncyCastle RSAHelper):
   stored = [128B RSA-PKCS1(type1) over first 100 plaintext bytes] + plaintext[100:]
   then ekp applies two sparse XOR passes on the assembled array 'a' (len = stored_len - 28).

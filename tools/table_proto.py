@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Parse The Piper Of Dawn Language / LanguageTalk decrypted protobuf tables.
+"""Parse The Piper of Dawn Language / LanguageTalk decrypted protobuf tables.
 Top-level: [4-byte LE header] repeated f1 int64 keys + repeated f2 row-messages.
 Row (SilentOrbit): f1=int id, f2=str, f3=int, f4=str, f5=str, f6=str.
 """
