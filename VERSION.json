@@ -1,15 +1,15 @@
 {
- "built": "2026-10-03",
- "game_manifest_version": "2026-10-03-84",
- "patch_version": "1.0.14",
+ "built": "2026-10-08",
+ "game_manifest_version": "2026-10-08-1009",
+ "patch_version": "1.0.15",
  "stats": {
   "Language": {
-   "applied": 6464,
+   "applied": 6483,
    "stale_skipped": 0,
    "untranslated": 0
   },
   "LanguageTalk": {
-   "applied": 41158,
+   "applied": 39900,
    "stale_skipped": 0,
    "untranslated": 0
   },
@@ -19,6 +19,6 @@
    "stale_skipped": 0
   }
  },
- "table_bundle": "b31df56f6f68765f410ea668b7bffb58",
- "table_content_crc": "f1d2c514"
+ "table_bundle": "3e412466cbdb495b49b4db4f49d98820",
+ "table_content_crc": "02862b1f"
 }
